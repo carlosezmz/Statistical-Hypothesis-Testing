@@ -1,0 +1,233 @@
+---
+title: 'Statistical Hypothesis Testing'
+runtime: html_document
+output:
+  pdf_document: default
+  html_document: default
+---
+
+Carlos E. Tavarez Martinez
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load-libraries, message=FALSE, warning=FALSE}
+#load required libraries here using library() command 
+library(readxl)
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+```
+
+##Background
+During two recent Australian summers of 2015–2016 and 2016-2017 Great Barrier Reef had massive coral bleaching of the global-scale. It is believed that these events were triggered by increasing ocean temperatures [1].
+
+The DaviesReef file contains mooring buoy temperature measurements at 3 different depths for a period of time from 01/2002 through 08/2018. More on the buoy’s location, temperature measuring sensors, as well as seasonal and diurnal temperature patters for this site can be found in [2]. Does this data record support the proposition that coral stress is related to changing temperature patterns?
+
+This question is addressed by formulating a pair of null and alternative hypothesis. The hypothesis are about unusual temperature pattern as compared to previous years. Comparisons of the means and daily temperature distribution for the entire month and the natural seasonal and diurnal cycle of the temperatures revealed temperature patterns might indicate possible coral reef bleaching during summer season. 
+
+
+##Hypothesis Testing
+
+Some code to get started.
+```{r start}
+#loading data
+types <- c("date", "date", "numeric", "numeric", "numeric")
+reef_data <- read_excel("AIMS_DaviesReefWeatherStation.xlsx", col_types = types)
+tail(reef_data)
+
+#plotting
+indices <- which(reef_data$Local_Date_Time >= as.POSIXct("2018-07-12", tz = "UTC") & reef_data$Local_Date_Time < as.POSIXct("2018-07-13", tz = "UTC"))
+plot(reef_data$Local_Date_Time[indices],reef_data$WaterTemp_4m[indices]+273.15, xlab="time", ylab="sea temperature", xaxt = "n", col = "red")
+axis.POSIXct(1, reef_data$Local_Date_Time[indices], format= ("%b/%d %H:%M"))
+grid()
+points(reef_data$Local_Date_Time[indices], reef_data$WaterTemp_8m[indices]+273.15, col="purple") #8m
+points(reef_data$Local_Date_Time[indices], reef_data$WaterTemp_18m[indices]+273.15, col="green") #18m
+
+```
+
+According to the graph, at 18 meters deep there is a delay and a small temperature difference compared to 4 and 8 meters deep. Also, for the simplicity of the model only the temperatures at 4 meters deep were considered. However, since there is a small gap in temperature difference, the dependency of the temperatures at 4 and 18 meters were addressed by a chi-square test, refer to the section of Coningency Analysis.
+
+#### Hypothesis Formulation 
+
+To create my hypothesis, I decided to get some background on how thermal stress affects coral reefs. A brief description of thermal stress cycle is displayed in the picture below, found on [3].  
+
+```{r pressure, echo=FALSE, fig.cap="A caption", out.width = '100%'}
+knitr::include_graphics("coralbleaching-large.jpg")
+```
+
+* Null Hypothesis: There was not abnormal temperature patterns prior summer season.
+
+* Alternative Hypothesis: Thermal stress was induced prior summer season. 
+
+To verify wether or not abnormal temperature patterns induced thermal stress on coral reefs, the analysis will only include winter season and its transitioning months, from April to September. Australia seasonal months are found in reference [4].
+
+#### Data Setup
+
+The code below shows the data selected for model trainning, model testing, and data selection for summer season. The statistical model provides the daily temperature distrbution and expected temperature for a given month.
+
+```{r, Data Setup}
+# Data Lake Setup
+
+# To obtain the diurnal cycle, the hours selected were based on the local time: 4-5 a.m. and 3-4 p.m.
+reef_data$year <- year(reef_data$UTC_Date_Time)
+reef_data$month <- month(reef_data$UTC_Date_Time)
+reef_data$day <- day(reef_data$UTC_Date_Time)
+reef_data$hour <- hour(reef_data$UTC_Date_Time)
+reef_data$minute <- minute(reef_data$UTC_Date_Time)
+
+# Selection of time cycle
+diurnal_temp <- filter(reef_data, hour==c("7", "17")) 
+
+# Observation Years
+mod_obs <- filter(diurnal_temp, year==c("2014", "2015", "2016", "2017", "2018")) 
+
+# Monthly Model Selection
+mod_train <- filter(diurnal_temp, year!=c("2004", "2010", "2014", "2015", "2016", "2017", "2018")) 
+
+mod_test <- filter(diurnal_temp, year==c("2004", "2010")) 
+
+# December
+mod_train_dec <- filter(mod_train, month=="12") 
+mod_test_dec <- filter(mod_test, month=="12") 
+mod_obs_dec <- filter(mod_obs, month=="12")
+
+# January
+mod_train_jan <- filter(mod_train, month=="1") 
+mod_test_jan <- filter(mod_test, month=="1") 
+mod_obs_jan <- filter(mod_obs, month=="1")
+
+# February
+mod_train_feb <- filter(mod_train, month=="2") 
+mod_test_feb <- filter(mod_test, month=="2") 
+mod_obs_feb <- filter(mod_obs, month=="2") 
+
+```
+
+#### Model Trainning and Summer Months
+
+The first graph shows the data used to build the temperature distribution and mean temperature. The second graph is a test of two years not included in the trainning data set. The next three graphs display temperature patterns among summer season.
+
+
+```{r, Model Trainning}
+# Model Trainning
+#  4 meters deep
+ggplot() + 
+  geom_smooth(data=mod_train_jan, aes(x=day, y=WaterTemp_4m), color="gray", linetype="dotted", method="auto", na.rm=TRUE, stat="unique") +
+  geom_point(data=mod_train_jan, aes(x=day, y=WaterTemp_4m)) + geom_smooth(data=mod_train_jan, aes(x=day, y=WaterTemp_18m), color="red", method="lm", na.rm=TRUE, linetype="dotted", level=0.95) + xlab("January-Day") + ylab("Temperature Celsius") + ggtitle("January, 4 meters Deep/Model Trarinning") + xlim(NA,32) + theme_bw()
+
+# Model Valuation
+#  4 meters deep
+ggplot() + 
+  geom_smooth(data=mod_train_jan, aes(x=day, y=WaterTemp_4m), color="gray", linetype="dotted", method="auto", na.rm=TRUE, stat="unique") +
+  geom_point(data=mod_test_jan, aes(x=day, y=WaterTemp_4m, color=factor(year))) + geom_smooth(data=mod_train_jan, aes(x=day, y=WaterTemp_18m), color="gray", method="lm", na.rm=TRUE, linetype="dotted", level=0.95) + xlab("January-Day") + ylab("Temperature Celsius") + ggtitle("January, 4 meters Deep/Model Valuation") + xlim(NA,32) + theme_bw()
+
+# Abnormal Observations Summer
+#  4 meters deep
+ggplot() + 
+  geom_smooth(data=mod_train_dec, aes(x=day, y=WaterTemp_4m), color="gray", linetype="dotted", method="auto", na.rm=TRUE, stat="unique") +
+  geom_point(data=mod_obs_dec, aes(x=day, y=WaterTemp_4m, color=factor(year))) + geom_smooth(data=mod_train_dec, aes(x=day, y=WaterTemp_18m), color="gray", method="lm", na.rm=TRUE, linetype="dotted", level=0.95) + xlab("January-Day") + ylab("Temperature Celsius") + ggtitle("December, 4 meters Deep/Model Observation") + xlim(NA,32) + theme_bw()
+
+ggplot() + 
+  geom_smooth(data=mod_train_jan, aes(x=day, y=WaterTemp_4m), color="gray", linetype="dotted", method="auto", na.rm=TRUE, stat="unique") +
+  geom_point(data=mod_obs_jan, aes(x=day, y=WaterTemp_4m, color=factor(year))) + geom_smooth(data=mod_train_jan, aes(x=day, y=WaterTemp_18m), color="gray", method="lm", na.rm=TRUE, linetype="dotted", level=0.95) + xlab("January-Day") + ylab("Temperature Celsius") + ggtitle("January, 4 meters Deep/Model Valuation") + xlim(NA,32) + theme_bw()
+
+ggplot() + 
+  geom_smooth(data=mod_train_feb, aes(x=day, y=WaterTemp_4m), color="gray", linetype="dotted", method="auto", na.rm=TRUE, stat="unique") +
+  geom_point(data=mod_obs_feb, aes(x=day, y=WaterTemp_4m, color=factor(year))) + geom_smooth(data=mod_train_feb, aes(x=day, y=WaterTemp_18m), color="gray", method="lm", na.rm=TRUE, linetype="dotted", level=0.95) + xlab("February-Day") + ylab("Temperature Celsius") + ggtitle("February, 4 meters Deep/Model Observation") + xlim(NA,32) + theme_bw()
+```
+
+#### Hypothesys Testing
+
+The code below displays temperature from April to September.
+
+```{r, Hypothesis Testing}
+# April
+mod_train_a <- filter(mod_train, month=="4")
+mod_test_a <- filter(mod_test, month=="4")
+mod_obs_a <- filter(mod_obs, month=="4")
+
+ggplot() + 
+  geom_smooth(data=mod_train_a, aes(x=day, y=WaterTemp_4m), color="gray", linetype="dotted", method="auto", na.rm=TRUE, stat="unique") +
+  geom_point(data=mod_obs_a, aes(x=day, y=WaterTemp_4m, color=factor(year))) + geom_smooth(data=mod_train_a, aes(x=day, y=WaterTemp_4m), color="gray", method="lm", na.rm=TRUE, linetype="dotted", level=0.95) + xlab("April-Day") + ylab("Temperature Celsius") + ggtitle("April, 4 meters Deep/Model Observation") + xlim(NA,32) + theme_bw()
+
+# May
+mod_train_m <- filter(mod_train, month=="5")
+mod_test_m <- filter(mod_test, month=="5")
+mod_obs_m <- filter(mod_obs, month=="5")
+
+ggplot() + 
+  geom_smooth(data=mod_train_m, aes(x=day, y=WaterTemp_4m), color="gray", linetype="dotted", method="auto", na.rm=TRUE, stat="unique") +
+  geom_point(data=mod_obs_m, aes(x=day, y=WaterTemp_4m, color=factor(year))) + geom_smooth(data=mod_train_m, aes(x=day, y=WaterTemp_4m), color="gray", method="lm", na.rm=TRUE, linetype="dotted", level=0.95) + xlab("May-Day") + ylab("Temperature Celsius") + ggtitle("May, 4 meters Deep/Model Observation") + xlim(NA,32) + theme_bw()
+
+# June
+mod_train_j <- filter(mod_train, month=="6")
+mod_test_j <- filter(mod_test, month=="6")
+mod_obs_j <- filter(mod_obs, month=="6")
+
+ggplot() + 
+  geom_smooth(data=mod_train_j, aes(x=day, y=WaterTemp_4m), color="gray", linetype="dotted", method="auto", na.rm=TRUE, stat="unique") +
+  geom_point(data=mod_obs_j, aes(x=day, y=WaterTemp_4m, color=factor(year))) + geom_smooth(data=mod_train_j, aes(x=day, y=WaterTemp_4m), color="gray", method="lm", na.rm=TRUE, linetype="dotted", level=0.95) + xlab("June-Day") + ylab("Temperature Celsius") + ggtitle("June, 4 meters Deep/Model Observation") + xlim(NA,32) + theme_bw()
+
+# July
+mod_train_jl <- filter(mod_train, month=="7")
+mod_test_jl <- filter(mod_test, month=="7")
+mod_obs_jl <- filter(mod_obs, month=="7")
+
+ggplot() + 
+  geom_smooth(data=mod_train_jl, aes(x=day, y=WaterTemp_4m), color="gray", linetype="dotted", method="auto", na.rm=TRUE, stat="unique") +
+  geom_point(data=mod_obs_jl, aes(x=day, y=WaterTemp_4m, color=factor(year))) + geom_smooth(data=mod_train_jl, aes(x=day, y=WaterTemp_4m), color="gray", method="lm", na.rm=TRUE, linetype="dotted", level=0.95) + xlab("July-Day") + ylab("Temperature Celsius") + ggtitle("July, 4 meters Deep/Model Observation") + xlim(NA,32) + theme_bw()
+
+# August
+mod_train_au <- filter(mod_train, month=="8")
+mod_test_au <- filter(mod_test, month=="8")
+mod_obs_au <- filter(mod_obs, month=="8")
+
+ggplot() + 
+  geom_smooth(data=mod_train_au, aes(x=day, y=WaterTemp_4m), color="gray", linetype="dotted", method="auto", na.rm=TRUE, stat="unique") +
+  geom_point(data=mod_obs_au, aes(x=day, y=WaterTemp_4m, color=factor(year))) + geom_smooth(data=mod_train_au, aes(x=day, y=WaterTemp_4m), color="gray", method="lm", na.rm=TRUE, linetype="dotted", level=0.95) + xlab("August-Day") + ylab("Temperature Celsius") + ggtitle("August, 4 meters Deep/Model Observation") + xlim(NA,32) + theme_bw()
+
+# September
+mod_train_s <- filter(mod_train, month=="9")
+mod_test_s <- filter(mod_test, month=="9")
+mod_obs_s <- filter(mod_obs, month=="9")
+
+ggplot() + 
+  geom_smooth(data=mod_train_s, aes(x=day, y=WaterTemp_4m), color="gray", linetype="dotted", method="auto", na.rm=TRUE, stat="unique") +
+  geom_point(data=mod_obs_s, aes(x=day, y=WaterTemp_4m, color=factor(year))) + geom_smooth(data=mod_train_s, aes(x=day, y=WaterTemp_4m), color="gray", method="lm", na.rm=TRUE, linetype="dotted", level=0.95) + xlab("September-Day") + ylab("Temperature Celsius") + ggtitle("September, 4 meters Deep/Model Observation") + xlim(NA,32) + theme_bw()
+
+
+```
+
+The data shows that there is reasonable evidence to claim that unussual temperature patterns prior summer season affects coral reef ecosystem. 
+
+* 2014 was used as an standard measure to compare how close it was to the expected temperature. Moreover, June and July were the only months the temperature were above of what was expected.
+
+* 2015 showed its highest deviation from the mean was seemed during April of approximately 1.2 Celsius, 1 Celsius in May, and less than 0.6 Celsius for the rest of the months.
+
+* 2016 showed the highest deviation than most years, particularly from May to July. Also, during September temperature seemed to vary, but most of the time was above the mean.
+
+* 2017 showed a similar pattern as 2014 except April and August, where the highest difference the from the mean was ~1.1 Celsius.
+
+Unussual temperatures from April to July might hint possible coral reef bleaching for the coming summer season. Therefore, we accept the alternative hypothesis and conclude that unussual high temperatures during three consecutive months may cause thermal stress making it hard to recover before summer season. One reason to support this claim is that the distribution of the temperatures in the statisticl model shows recorded high temperatures and even some years show high temperature in some days, suggesting that coral reef can resist a few days under high temperature. 
+
+## Contingency Analysis
+Using Chi-square test for independence, it was checked the temperatures at 4m and 18m depth are dependent. 
+
+```{r, Contigency Analysis}
+chisq.test(diurnal_temp$WaterTemp_4m, diurnal_temp$WaterTemp_18m)
+```
+The fact that the p-value is smaller than five, approximately zero suggests that temperature at 4 meters and 18 meters dependent. Of corse they have to be dependent, it is like crossing a bridge to get to the other side. 
+
+## References:
+
+[1] Great Barrier Reef Marine Park Authority 2017, Final report: 2016 Coral bleaching event on the Great Barrier Reef, GBRMPA, Townsville. http://elibrary.gbrmpa.gov.au/jspui/bitstream/11017/3206/1/Final-report-2016-coral-bleaching-GBR.pdf
+
+[2] Scott J. Bainbridge, “Temperature and light patterns at four reefs along the Great Barrier Reef during the 2015–2016 austral summer: understanding patterns of observed coral bleaching”, Journal of Operational Oceanography, 2017 10(1) pp. 16-29 https://www.tandfonline.com/doi/pdf/10.1080/1755876X.2017.1290863?needAccess=true
+
+[3] National Ocean Services. (2018). What is coral bleaching?. [online] Available at: https://oceanservice.noaa.gov/facts/coral_bleach.html [Accessed 3 Nov. 2018].
+
+[4] Bom.gov.au. (2018). Australia Government - Buraeu of Metereology. [online] Available at: http://www.bom.gov.au/climate/glossary/seasons.shtml [Accessed 3 Nov. 2018].
+
